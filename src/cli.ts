@@ -9,6 +9,9 @@ import type { RunOptions, TargetRun } from "./engine.ts";
 import { runDaemon } from "./scheduler.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
+import { seedWatchesFromConfig } from "./seed.ts";
+import { PollPlanner } from "./poll-planner.ts";
+import { startServer } from "./server.ts";
 import { prettyDate, prettyTime } from "./time.ts";
 import type {
   Availability,
@@ -59,17 +62,20 @@ interface Context {
   providers: Record<ProviderId, Provider>;
   notifier: Notifier;
   radar: Radar;
+  planner: PollPlanner;
 }
 
 function createContext(configPath?: string): Context {
   const config = loadConfig(configPath ?? "config/watch.json");
   const dbPath = env("TICKET_RADAR_DB") ?? "./data/ticket-radar.db";
   const store = new Store(dbPath);
+  seedWatchesFromConfig(store, config);
   const log = createLogger("radar");
   const providers = createProviders(store, log);
   const notifier = new Notifier(config.notify, log);
   const radar = new Radar(config, store, providers, notifier, log);
-  return { config, store, log, providers, notifier, radar };
+  const planner = new PollPlanner(config, store, providers, log);
+  return { config, store, log, providers, notifier, radar, planner };
 }
 
 function pickTarget(config: WatchConfig, id?: string | true): WatchTarget {
@@ -91,6 +97,8 @@ async function main(): Promise<void> {
   switch (command) {
     case "watch":
       return cmdWatch(flags);
+    case "serve":
+      return cmdServe(flags);
     case "once":
       return cmdOnce(flags);
     case "doctor":
@@ -113,7 +121,26 @@ async function main(): Promise<void> {
 async function cmdWatch(flags: Map<string, string | true>): Promise<void> {
   const ctx = createContext(asString(flags.get("config")));
   try {
-    await runDaemon(ctx.radar, ctx.config, ctx.log);
+    const host = env("TICKET_RADAR_HOST") ?? "127.0.0.1";
+    const port = Number(env("TICKET_RADAR_PORT") ?? "4317");
+    const server = await startServer(ctx.store, ctx.planner, ctx.config, ctx.log, port, host);
+    await server.close();
+  } finally {
+    ctx.store.close();
+  }
+}
+
+async function cmdServe(flags: Map<string, string | true>): Promise<void> {
+  const ctx = createContext(asString(flags.get("config")));
+  try {
+    const host = env("TICKET_RADAR_HOST") ?? "127.0.0.1";
+    const port = Number(env("TICKET_RADAR_PORT") ?? "4317");
+    const server = await startServer(ctx.store, ctx.planner, ctx.config, ctx.log, port, host);
+    await new Promise<void>((resolve) => {
+      process.once("SIGINT", () => resolve());
+      process.once("SIGTERM", () => resolve());
+    });
+    await server.close();
   } finally {
     ctx.store.close();
   }
@@ -123,17 +150,19 @@ async function cmdOnce(flags: Map<string, string | true>): Promise<void> {
   const ctx = createContext(asString(flags.get("config")));
   const verbose = flags.has("verbose");
   try {
-    const targets = flags.has("target")
-      ? [pickTarget(ctx.config, flags.get("target"))]
-      : ctx.config.targets.filter((t) => t.enabled !== false);
-
     if (!ctx.notifier.configured) {
       ctx.log.warn("no notification channels configured — alerts will only be logged");
     }
 
-    for (const target of targets) {
-      const run = await ctx.radar.runTarget(target, { deliver: true } satisfies RunOptions);
-      printRun(run, verbose);
+    const monitors = ctx.planner.listMonitors();
+    if (monitors.length === 0) {
+      console.log("no watches to poll");
+      return;
+    }
+
+    for (const group of monitors) {
+      const run = await ctx.planner.runMonitor(group.id, group.provider, group.watches, { deliver: true });
+      printMonitorRun(run, verbose);
     }
   } finally {
     ctx.store.close();
@@ -289,6 +318,23 @@ async function cmdNotifyTest(flags: Map<string, string | true>): Promise<void> {
   }
 }
 
+function printMonitorRun(run: import("./poll-planner.ts").MonitorRun, verbose: boolean): void {
+  console.log(`\n=== ${run.monitorId} (${run.provider})`);
+  console.log(`Checked at ${run.startedAt} · next poll ~${run.intervalSec}s · ${run.sessions} show(s) · ${run.alerts} alert(s)`);
+
+  if (run.seats.length > 0) {
+    const ok = run.seats.filter((s) => !s.error);
+    const free = ok.reduce((sum, s) => sum + s.available, 0);
+    console.log(`  seats: ${ok.length}/${run.seats.length} checked · ${free} free`);
+    if (verbose) {
+      for (const seat of run.seats) {
+        const status = seat.error ? `error: ${seat.error}` : `${seat.available} free, ${seat.matched} watched`;
+        console.log(`    ${seat.provider}/${seat.sessionId} ${prettyTime(seat.startIst)} ${seat.venueName}: ${status}`);
+      }
+    }
+  }
+}
+
 function printRun(run: TargetRun, verbose: boolean): void {
   console.log(`\n=== ${run.label} (${run.targetId})`);
   console.log(`Checked at ${run.startedAt} · next poll ~${run.intervalSec}s`);
@@ -358,7 +404,8 @@ Usage:
   node src/cli.ts <command> [options]
 
 Commands:
-  watch                  Run the polling daemon (Ctrl+C to stop)
+  watch                  Run the polling daemon + API (Ctrl+C to stop)
+  serve                  Run the API server only
   once                   One real poll: updates state and sends alerts
   doctor                 Read-only connectivity + inventory check
   seats [target] [sid]   List shows, or dump a seat map for one session

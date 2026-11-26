@@ -111,10 +111,16 @@ export interface TelegramConfig {
   chatId: string;
 }
 
+export interface QuietHours {
+  from: string;
+  to: string;
+}
+
 export interface NotifyConfig {
   onShowOpen: boolean;
   onSeatFreed: boolean;
   maxSeatsPerAlert: number;
+  quietHours?: QuietHours;
   ntfy?: NtfyConfig;
   telegram?: TelegramConfig;
 }
@@ -124,6 +130,101 @@ export interface WatchConfig {
   cadence: CadenceConfig;
   notify: NotifyConfig;
   targets: WatchTarget[];
+}
+
+export interface NotifyProfile {
+  id: string;
+  name: string;
+  ntfyTopic?: string;
+  telegramChat?: string;
+}
+
+/** A user-defined alert. One watch can span both providers. */
+export interface WatchRecord {
+  id: string;
+  name: string;
+  owner: string;
+  enabled: boolean;
+  profileId: string;
+  movie: {
+    title: string;
+    districtContentId?: string;
+    bmsEventCode?: string;
+  };
+  city: {
+    districtKey?: string;
+    bmsRegion?: string;
+    bmsSlug?: string;
+    label?: string;
+  };
+  date: string;
+  providers: ProviderId[];
+  venues: {
+    include: string[];
+    exclude: string[];
+  };
+  timeWindow: {
+    from?: string;
+    to?: string;
+  };
+  seats: {
+    rows: string[];
+    numbers: string[];
+    minSeats: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+export interface CreateWatchInput {
+  /** Optional explicit id (used when seeding from config). */
+  id?: string;
+  name: string;
+  owner?: string;
+  enabled?: boolean;
+  profileId: string;
+  movie: WatchRecord["movie"];
+  city: WatchRecord["city"];
+  date: string;
+  providers: ProviderId[];
+  venues?: Partial<WatchRecord["venues"]>;
+  timeWindow?: Partial<WatchRecord["timeWindow"]>;
+  seats?: Partial<WatchRecord["seats"]>;
+}
+
+export interface UpdateWatchInput {
+  name?: string;
+  owner?: string;
+  enabled?: boolean;
+  profileId?: string;
+  venues?: Partial<WatchRecord["venues"]>;
+  timeWindow?: Partial<WatchRecord["timeWindow"]>;
+  seats?: Partial<WatchRecord["seats"]>;
+}
+
+export interface WatchStatus {
+  watchId: string;
+  availability: Availability;
+  sessionCount: number;
+  matchedCount: number;
+  seatsFree: number;
+  watchedFree: number;
+  lastCheckedAt: string;
+  detail: string;
+}
+
+export interface MonitorRecord {
+  id: string;
+  provider: ProviderId;
+  movieTitle: string;
+  movieKey: string;
+  cityKey: string;
+  date: string;
+  availability: Availability;
+  sessionCount: number;
+  lastCheckedAt: string;
+  detail: string;
 }
 
 export type Priority = "min" | "low" | "default" | "high" | "urgent";

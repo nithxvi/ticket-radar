@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/components/seatmappreview.tsx","./src/hooks/usewatches.ts","./src/pages/alerts.tsx","./src/pages/dashboard.tsx","./src/pages/login.tsx","./src/pages/newwatch.tsx","./src/pages/search.tsx","./src/pages/settings.tsx","./src/pages/watchdetail.tsx"],"version":"5.9.3"}

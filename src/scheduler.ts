@@ -1,24 +1,18 @@
 import type { WatchConfig } from "./types.ts";
-import type { Radar, TargetRun } from "./engine.ts";
+import type { PollPlanner, MonitorRun } from "./poll-planner.ts";
+import type { Store } from "./store.ts";
 import type { Logger } from "./log.ts";
 import { jitter } from "./engine.ts";
 
 export const HOT_WINDOW_MS = 15 * 60_000;
 
-/**
- * Per-target scheduler. Each target gets its own next-due time so a closed
- * date can idle at 5 minutes while an open date polls at 2 minutes. When an
- * alert fires, that target drops to the hot cadence (60s floor) for 15
- * minutes, then drifts back. Every interval gets jitter.
- */
-export async function runDaemon(radar: Radar, config: WatchConfig, log: Logger): Promise<void> {
-  const targets = config.targets.filter((t) => t.enabled !== false);
-  if (targets.length === 0) {
-    log.warn("no enabled targets — nothing to do");
-    return;
-  }
-
-  const nextDue = new Map<string, number>(targets.map((t) => [t.id, 0]));
+export async function runDaemon(
+  planner: PollPlanner,
+  store: Store,
+  config: WatchConfig,
+  log: Logger,
+): Promise<void> {
+  const nextDue = new Map<string, number>();
   const hotUntil = new Map<string, number>();
   let stopping = false;
 
@@ -31,45 +25,62 @@ export async function runDaemon(radar: Radar, config: WatchConfig, log: Logger):
   process.once("SIGTERM", () => stop("SIGTERM"));
 
   log.info(
-    `watching ${targets.length} target(s) · base ${config.cadence.baseSec}s · ` +
+    `watching · base ${config.cadence.baseSec}s · ` +
       `closed ${config.cadence.closedSec}s · hot ${config.cadence.hotSec}s · ` +
       `jitter ±${config.cadence.jitterPct}% · 60s floor`,
   );
 
   while (!stopping) {
+    const groups = planner.listMonitors();
+    const ids = new Set(groups.map((g) => g.id));
+
+    // prune
+    for (const key of [...nextDue.keys()]) {
+      if (!ids.has(key)) nextDue.delete(key);
+    }
+    for (const g of groups) {
+      if (!nextDue.has(g.id)) nextDue.set(g.id, 0);
+    }
+
+    if (groups.length === 0) {
+      log.warn("no enabled watches — nothing to do");
+      await sleep(5_000);
+      if (stopping) break;
+      continue;
+    }
+
     const now = Date.now();
-    const due = targets.filter((t) => (nextDue.get(t.id) ?? 0) <= now);
+    const due = groups.filter((g) => (nextDue.get(g.id) ?? 0) <= now);
 
     if (due.length === 0) {
-      const earliest = Math.min(...targets.map((t) => nextDue.get(t.id) ?? now));
+      const earliest = Math.min(...groups.map((g) => nextDue.get(g.id) ?? now));
       await sleep(clamp(earliest - now, 250, 5_000));
       continue;
     }
 
-    for (const target of due) {
+    for (const group of due) {
       if (stopping) break;
-
       try {
-        const run = await radar.runTarget(target, { deliver: true });
-        if (run.alerts > 0) hotUntil.set(target.id, Date.now() + HOT_WINDOW_MS);
+        const run = await planner.runMonitor(group.id, group.provider, group.watches, { deliver: true });
+        if (run.alerts > 0) hotUntil.set(group.id, Date.now() + HOT_WINDOW_MS);
 
-        const hot = (hotUntil.get(target.id) ?? 0) > Date.now();
+        const hot = (hotUntil.get(group.id) ?? 0) > Date.now();
         const base = hot ? config.cadence.hotSec : run.intervalSec;
         const interval = jitter(base, config.cadence.jitterPct);
-        nextDue.set(target.id, Date.now() + interval * 1000);
+        nextDue.set(group.id, Date.now() + interval * 1000);
 
-        logRun(run, hot, log);
+        logMonitor(run, hot, log);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        log.error(`poll failed for ${target.id}: ${message}`);
+        log.error(`poll failed for ${group.id}: ${message}`);
         const interval = jitter(config.cadence.baseSec, config.cadence.jitterPct);
-        nextDue.set(target.id, Date.now() + interval * 1000);
+        nextDue.set(group.id, Date.now() + interval * 1000);
       }
     }
   }
 }
 
-export function logRun(run: TargetRun, hot: boolean, log: Logger): void {
+export function logMonitor(run: MonitorRun, hot: boolean, log: Logger): void {
   const providers = run.providers
     .map((p) => {
       const state = p.availability.padEnd(8);
@@ -85,7 +96,7 @@ export function logRun(run: TargetRun, hot: boolean, log: Logger): void {
     : "";
 
   log.info(
-    `[${run.targetId}] ${providers}${seats}` +
+    `[${run.monitorId}] ${providers}${seats}` +
       `${run.alerts > 0 ? ` · ${run.alerts} alert(s)` : ""}` +
       `${hot ? " · hot" : ""}`,
   );
