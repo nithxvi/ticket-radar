@@ -1,0 +1,44 @@
+{
+  "timezone": "Asia/Kolkata",
+  "cadence": {
+    "baseSec": 120,
+    "closedSec": 300,
+    "hotSec": 60,
+    "jitterPct": 25,
+    "seatHorizonDays": 60
+  },
+  "notify": {
+    "onShowOpen": true,
+    "onSeatFreed": true,
+    "maxSeatsPerAlert": 12
+  },
+  "targets": [
+    {
+      "id": "dune3-chennai-2026-12-19",
+      "label": "Dune: Part Three — Chennai IMAX — Sat 19 Dec",
+      "enabled": true,
+      "date": "2026-12-19",
+      "providers": ["district", "bms"],
+      "movie": {
+        "title": "Dune: Part Three",
+        "districtContentId": "207332",
+        "bmsEventCode": "ET00491771"
+      },
+      "city": {
+        "districtKey": "chennai",
+        "bmsRegion": "CHN",
+        "bmsSlug": "chennai",
+        "lat": 13.0569,
+        "lng": 80.2425
+      },
+      "venues": {
+        "include": ["PVR Palazzo", "INOX Phoenix"],
+        "exclude": []
+      },
+      "seats": {
+        "rows": ["H", "J", "K", "L"],
+        "seats": []
+      }
+    }
+  ]
+}

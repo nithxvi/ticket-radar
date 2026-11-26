@@ -1,0 +1,28 @@
+{
+  "name": "ticket-radar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
+    "watch": "node src/cli.ts watch",
+    "once": "node src/cli.ts once",
+    "doctor": "node src/cli.ts doctor",
+    "seats": "node src/cli.ts seats",
+    "notify-test": "node src/cli.ts notify-test",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "impit": "^0.14.9"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}
