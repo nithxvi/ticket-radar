@@ -124,6 +124,7 @@ async function cmdWatch(flags: Map<string, string | true>): Promise<void> {
     const host = env("TICKET_RADAR_HOST") ?? "127.0.0.1";
     const port = Number(env("TICKET_RADAR_PORT") ?? "4317");
     const server = await startServer(ctx.store, ctx.planner, ctx.config, ctx.log, port, host);
+    await runDaemon(ctx.planner, ctx.store, ctx.config, ctx.log);
     await server.close();
   } finally {
     ctx.store.close();
